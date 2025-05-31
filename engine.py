@@ -1,6 +1,8 @@
-import math, subprocess, io
+import math
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
+import random
 from graphviz import Digraph
 
 def trace(root):
@@ -122,9 +124,45 @@ class Value:
         for n in reversed(topo):
             n._backward()
 
-def f(x):
-    return 3*x**2 - 4*x + 5
+class Neuron:
+    def __init__(self, nin):
+        self.w = [Value(random.uniform(-1,1)) for _ in range(nin)]
+        self.b = Value(random.uniform(-1,1))
 
+    def __call__(self, x):
+        act = sum((wi * xi for wi, xi in zip(self.w, x)), self.b)
+        out = act.tanh()
+        return out
+
+    def parameters(self):
+        return self.w + [self.b]
+
+class Layer:
+    def __init__(self, nin, nout):
+        self.neurons = [Neuron(nin) for _ in range(nout)]
+
+    def __call__(self, x):
+        outs = [n(x) for n in self.neurons]
+        return outs[0] if len(outs) == 1 else outs
+    
+    def parameters(self):
+        return [p for neuron in self.neurons for p in neuron.parameters()]
+            
+class MLP:
+    """
+    
+    nouts=[8, 8, 1] → 3 层:8->8->1,列表长度 = 网络深度，列表元素 = 每层神经元个数。
+    """
+    def __init__(self, nin, nouts):
+        sz = [nin] + nouts
+        self.layers = [Layer(sz[i], sz[i+1]) for i in range(len(nouts))]
+    def __call__(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+    
+    def parameters(self):
+        return [p for layer in self.layers for p in layer.parameters()]
 
 if __name__ == "__main__":
     # nural netwrok
@@ -159,3 +197,67 @@ if __name__ == "__main__":
     o.backward()
     dot = draw_dot(o)
     dot.render('graph', format='svg')
+
+    x1 = torch.Tensor([2.0]).double(); x1.requires_grad = True
+    x2 = torch.Tensor([0.0]).double(); x2.requires_grad = True
+    w1 = torch.Tensor([-3.0]).double(); w1.requires_grad = True
+    w2 = torch.Tensor([1.0]).double(); w2.requires_grad = True
+    b = torch.Tensor([8.0]).double(); b.requires_grad = True
+    n = x1*w1 + x2*w2 + b
+    o = torch.tanh(n)
+    print(o.data.item())
+    o.backward()
+
+    print('---')
+    print('x2', x2.grad.item())
+    print('w2', w2.grad.item())
+    print('x1', x1.grad.item())
+    print('w1', w1.grad.item())
+
+    print('---')
+    x = [2.0, 3.0, -1.0]
+    n = MLP(3, [4, 4, 1])
+    o = n(x)
+    o.backward()
+    print(n.parameters())
+    # print(n(x))
+
+    draw_dot(o).render('graph', format='svg')
+
+    xs = [
+        [2.0, 3.0, -1.0],
+        [3.0, -1.0, 0.5],
+        [0.5, 1.0, 1.0],
+        [1.0, 1.0, -1.0]
+    ]
+    ys = [1.0, -1.0, -1.0, 1.0]
+    ypred = [n(x) for x in xs]
+    print(ypred)
+    # all the loss
+    loss = sum([(yout - ygt)**2 for ygt, yout in zip(ys, ypred)])
+    print('loss', loss)
+    loss.backward()
+    print(n.layers[0].neurons[0].w[0].grad)
+    print(n.layers[0].neurons[0].w[0].data)
+    for p in n.parameters():
+        p.data += -0.01 * p.grad
+    print(n.layers[0].neurons[0].w[0].data)
+
+    ypred = [n(x) for x in xs]
+    print('ypred',ypred)
+    loss = sum([(yout - ygt)**2 for ygt, yout in zip(ys, ypred)])
+    print('loss', loss)
+
+    for k in range(100):
+        ypred = [n(x) for x in xs]
+        loss = sum([(yout - ygt)**2 for ygt, yout in zip(ys, ypred)])
+        for p in n.parameters():
+            p.grad = 0.0
+        loss.backward()
+        for p in n.parameters():
+            p.data += -0.1 * p.grad
+        print(k, loss)
+    print('---')
+    print(ypred)
+    draw_dot(loss).render('graph', format='svg')
+
